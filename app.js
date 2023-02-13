@@ -4,7 +4,16 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const request = require('request');
 const getConnection = require('./libs/postgres');
-let c_order_id= 0;
+const {config } = require('./config/config')
+let record_id = 0;
+let ad_table_id = 0;
+let ad_org_id = 0;
+let user1_id = 0;
+let ad_wf_activity_id = 0;
+let ad_client_id = 0;
+let documentno =' ';
+let user =' '; 
+let c_costo =' ';
 
 
 const app = express();
@@ -21,15 +30,27 @@ app.get('/', function(req, response){
 
 app.get('/webhook', function(req, response){
  
+  try {
 
-    if(req.query['hub.verify_token'] === '14nc4r1n4'){
-        response.send(req.query['hub.challenge']);
-    } else {
-        response.send(' Violacion.No tienes permisos.')
-    }
+    if(req.query['hub.verify_token'] === config.tokenWebhook){
+      response.send(req.query['hub.challenge']);
+   } else {
+      response.send(' Violacion.No tienes permisos.')
+   }
+    
+  } catch (error) {
+    
+    console.error(error);
+    console.log('Ocurrio un error se esta reiniciando la app ...');
+  }
+
+   
 })
 
 app.post('/webhook/', async function(req, res){   
+
+  try {
+
     let body_param = req.body;    
     let status='';
     let wamId='';  
@@ -50,14 +71,9 @@ app.post('/webhook/', async function(req, res){
                 console.log(status);     
                 
                  switch (status) {
-                    case 'sent':
-                     
+                    case 'sent':               
                     
-                      //console.log(c_order_id);                      
-                      //const client = await getConnection();  
-                      //const rta= await client.query(`insert into bot_wsapp (bot_wsapp_fecha,bot_wsapp_status,c_order_id,bot_wsapp_wamid)
-                      //values('${FormatFecha()}', '${status}', ${c_order_id},'${wamId}')`);            
-                      //console.log(`Numero de filas afectadas: ${rta.rowCount}`);                        
+                                          
                      
                       
                       break;
@@ -65,13 +81,14 @@ app.post('/webhook/', async function(req, res){
                     case 'read':
                      
                     case 'delivered':
-                      let SiWam = await SelectWam(wamId);
-                      if (SiWam != 0) {
+                      console.log ('entro delivered')
+                      let [orderId,User,Org,Activity,Client,Table,Doc] = await SelectWam(wamId);
+                      if (orderId != 0) {
+                        UpdateBotw(orderId, Activity);
+
+                        InsertBotW(status,orderId,wamId,User,Activity,Table,Org,Client,Doc);
                         
-                        const client = await getConnection();  
-                        const rta= await client.query(`insert into bot_wsapp (bot_wsapp_fecha,bot_wsapp_status,c_order_id,bot_wsapp_wamid)
-                        values('${FormatFecha()}', '${status}', ${SiWam},'${wamId}')`);            
-                        console.log(`Numero de filas afectadas: ${rta.rowCount}`);     
+                       
 
                       }
                       break;
@@ -96,45 +113,36 @@ app.post('/webhook/', async function(req, res){
              
               
                if (message === 'Si') {
-                  console.log('Ticket Aprobado'); //Aqui va el update de c_order
+                  console.log('Ticket Aprobado'); 
 
-                  const IsAproved ='Y';
-                  const DocStatus ='CO';
-                  const Processed ='Y';
-                  const Docaction = 'CL';
-                  status = 'Aprobado';
-                  let SiWam = await SelectWam(wamId);
+                  
+                  status = 'approved';
+                  let [SiWam,User,Org,Activity,Client,Table,Doc] = await SelectWam(wamId);
 
                   if (SiWam != 0) {
-                  InsertBotW(status,SiWam,wamId); // aqui incluye en la tabla botwsapp cuando es el 4to status y aprobado
-                   
-                  const client = await getConnection();                   
-                  
-                  const rta= await client.query(`Update c_order set docstatus='${DocStatus}', isapproved='${IsAproved}' , processed='${Processed}' , docaction='${Docaction}' where c_order_id=${SiWam}`);
-                  
-                  console.log(`Update:c_order Numero de filas afectadas: ${rta.rowCount}`);
-                  }
-                  
-                 
-   
+                    UpdateBotw(SiWam, Activity);
 
+                    
+                    let record_id = await SelectApprovedOrRejected(SiWam, Activity);
+                    if(record_id === 0)
+                      InsertBotW(status,SiWam,wamId,User,Activity,Table,Org,Client,Doc); // aqui incluye en la tabla botwsapp cuando es el 4to status y aprobado
+                   
+                 
+                  }
                 } else {
                    console.log('Ticket NO Aprobado');
-                   const IsAproved ='N';
-                   const DocStatus ='CO';
-                   const Processed ='Y';
-                   const Docaction = 'CL';
-                   status = 'Rechazado';
+                   
+                   status = 'rejected';
 
-                  let SiWam = await SelectWam(wamId);                  
+                   let [SiWam,User,Org,Activity,Client,Table,Doc] = await SelectWam(wamId);                
                   if (SiWam != 0) {
-
-                   InsertBotW(status,SiWam,wamId); // aqui incluye en la tabla botwsapp cuando es el 4to status y rechazado
+                    UpdateBotw(SiWam, Activity);
+                    
+                    let record_id = await SelectApprovedOrRejected(SiWam, Activity);
+                    if(record_id === 0)
+                      InsertBotW(status,SiWam,wamId,User,Activity,Table,Org,Client,Doc); // aqui incluye en la tabla botwsapp cuando es el 4to status y rechazado
                  
-                   const client = await getConnection();  
-                   const rta= await client.query(`Update c_order set docstatus='${DocStatus}', isapproved='${IsAproved}' , processed='${Processed}' , docaction='${Docaction}' where c_order_id=${SiWam}`);
                   
-                   console.log(`Update:c_order Numero de filas afectadas: ${rta.rowCount}`);
                   }
                 }
                 
@@ -146,15 +154,34 @@ app.post('/webhook/', async function(req, res){
 
      
   }      
-          
+
+    
+  } catch (error) {
+
+    console.error(error);
+    console.log('Ocurrio un error se esta reiniciando la app ...');
+    
+  }
+
+              
      
 })
 
 app.listen(app.get('port'), function(){
-  
-  setInterval (Listening, 30000);
 
-  console.log('Nuestro servidor esta funcionando en el puerto', app.get('port'));
+  try {
+    
+    setInterval (Listening, 30000);
+
+    console.log('Nuestro servidor esta funcionando en el puerto', app.get('port'));
+    
+  } catch (error) {
+    
+    console.error(error);
+    console.log('Ocurrio un error se esta reiniciando la app ...');     
+  }
+  
+  
 })
 
 function TratarLength(cadena){
@@ -168,32 +195,93 @@ function TratarLength(cadena){
  return length;
 }
 
-async function SelectBd(IdOrder){  // revisa si ya se mando un mensaje al usuario aprobador (no lo puede volver a enviar)
+async function SelectBd(IdOrder,ad_wf_activity_id){  // revisa si ya se mando un mensaje al usuario aprobador (no lo puede volver a enviar)
  let NumR = 0;
-  const client = await getConnection();   
-  const rta= await client.query(`SELECT * FROM bot_wsapp where c_order_id = ${IdOrder}`);
-  if (rta.rowCount > 0) {
+ const client = await getConnection();   
+ const rta= await client.query(`SELECT * FROM bot_wsapp where record_id = ${IdOrder} and isactive='Y' and ad_wf_activity_id=${ad_wf_activity_id}`); 
+
+ if (rta.rowCount > 0) { 
+               
+     
      NumR = 1;
   }
+  client.end();
   return NumR;
 }
 
-async function SelectWam(IdWam){  // revisa si ya se mando un mensaje al usuario aprobador (no lo puede volver a enviar)
-  let NumR = 0;
-  let i = 0;
-   const client = await getConnection();     
-   const rta= await client.query(`SELECT * FROM bot_wsapp where bot_wsapp_wamid = '${IdWam}'`);
-   if (rta.rowCount > 0) {
-      NumR = rta.rows[i].c_order_id;
+async function SelectResent(IdOrder, ad_wf_activity_id){  // revisa si ya se mando un mensaje al usuario aprobador (no lo puede volver a enviar)
+  let resent_id = 0;
+  const client = await getConnection();   
+  const rta= await client.query(`SELECT bot_wsapp_id FROM bot_wsapp where record_id = ${IdOrder} and isactive='Y' and bot_wsapp_status='resent' and processed='N' and ad_wf_activity_id=${ad_wf_activity_id}`); 
+
+  if (rta.rowCount > 0) {
+     resent_id = rta.rows[0].bot_wsapp_id;
    }
-   return NumR;
+   client.end();
+   return resent_id;
  }
 
-async function InsertBotW (stat,id_order,wamiden){
+ async function SelectApprovedOrRejected(IdOrder, ad_wf_activity_id){  // revisa si ya se mando un mensaje al usuario aprobador (no lo puede volver a enviar)
+  let bot_wsapp_id = 0;
+   const client = await getConnection();   
+  const rta= await client.query(`SELECT bot_wsapp_id FROM bot_wsapp where record_id = ${IdOrder} and isactive='Y' and bot_wsapp_status IN ('approved','rejected') and ad_wf_activity_id=${ad_wf_activity_id}`); 
+
+  if (rta.rowCount > 0) {
+    bot_wsapp_id = rta.rows[0].bot_wsapp_id;
+   }
+   client.end();
+   return bot_wsapp_id;
+ }
+
+async function SelectWam(IdWam){  // revisa por el codigo Id mssg de whatsapp, si existe, manda los atributos
+  let NumR = 0;
+  let NumUs = 0;
+  let NumOrg = 0;
+  let NumAct = 0;
+  let NumClient = 0;
+  let NumTable = 0;
+  let Document = '';
+  let i = 0;
+
+   const client = await getConnection();     
+   const rta= await client.query(`SELECT * FROM bot_wsapp where bot_wsapp_wamid = '${IdWam}'`);
+
+   if (rta.rowCount > 0) {
+      NumR = rta.rows[i].record_id;
+      NumUs = rta.rows[i].user1_id;
+      NumOrg = rta.rows[i].ad_org_id;
+      NumAct = rta.rows[i].ad_wf_activity_id;
+      NumClient = rta.rows[i].ad_client_id;
+      NumTable = rta.rows[i].ad_table_id;
+      Document = rta.rows[i].documentno;
+   }
+   client.end();
+   return [NumR,NumUs,NumOrg,NumAct,NumClient,NumTable,Document];  
+
+ }
+async function UpdateBotw (id_order, ad_wf_activity_id){
+  const Processed ='Y';
+  const client = await getConnection();
+  
+  const rta= await client.query(`Update bot_wsapp set updated= '${FormatFecha()}', processed='${Processed}' where record_id=${id_order} and bot_wsapp_status not in ('approved','rejected') and ad_wf_activity_id=${ad_wf_activity_id}`);
+  console.log(`Update:c_order Numero de filas afectadas: ${rta.rowCount}`);
+  client.end();
+  
+}
+
+async function InsertBotW (stat,id_order,wamiden,user1_id,ad_wf_acti,ad_table, ad_org,ad_client,docno){
   const client = await getConnection();  
-  const rta= await client.query(`insert into bot_wsapp (bot_wsapp_fecha,bot_wsapp_status,c_order_id,bot_wsapp_wamid)
-  values('${FormatFecha()}', '${stat}', ${id_order},'${wamiden}')`);            
-  console.log(`Numero de filas afectadas botw: ${rta.rowCount}`);
+  
+  
+  const rta= await client.query(`insert into bot_wsapp (bot_wsapp_id,created,updated,createdby,updatedby
+    ,isactive,processed,ad_client_id, ad_org_id, UUID, AD_WF_Activity_ID, User1_ID, 
+    bot_wsapp_status,record_id,bot_wsapp_wamid,ad_table_id,documentno)
+   values(nextval('bot_wsapp_seq') ,'${FormatFecha()}','${FormatFecha()}',100,100, 
+  'Y','N',${ad_client},${ad_org},  getuuid(), ${ad_wf_acti}, ${user1_id},
+  '${stat}', ${id_order},'${wamiden}','${ad_table}','${docno}')`);
+  console.log(`insert Numero de filas afectadas: ${rta.rowCount}`); 
+
+  client.end();
 }
 
 function FormatFecha(){
@@ -213,76 +301,133 @@ function FormatFecha(){
 
 
 async function Listening(){
-  const IsAproved ='N';
-  const DocStatus ='IP';
-  const ResId = 101;    
-  let SendOn =0;
-  
-  console.log('estoy escuchando la BD');
  
+  
 
- 
+  try {
+    const WfState = "OS";
+    const processed = "N";
+    const Table = 259;
+    const Table2 = 702;
+    const SendNoti = "Y";
+    const adclient = 1000000;
 
-  const client = await getConnection();  
+    const ResId = 101;
+    let SendOn = 0;
+
+    console.log("estoy escuchando la BD");
+
+    const client = await getConnection();
+
+    const rta =
+      await client.query(`SELECT oc.c_order_id As DocT,oc.documentno,oc.created, oc.user1_id, awfp.ad_wf_process_id, awfa.ad_wf_activity_id, awfa.ad_table_id, awfp.record_id, awfp.processed, awfa.ad_wf_responsible_id, au.name AS user, au.email, au.phone,oc.ad_client_id,oc.ad_org_id,oc.createdby, oc.isapproved as Aprobada, oc.docstatus AS Status, cc.name AS ccosto
+
+  FROM ad_wf_process  AS awfp 
+  JOIN ad_wf_activity AS awfa ON awfa.ad_wf_process_id = awfp.ad_wf_process_id
+  join ad_wf_node as awfn on awfa.ad_wf_node_id = awfn.ad_wf_node_id 
+  JOIN ad_user        AS au   ON au.ad_user_id = awfa.ad_user_id
+  JOIN c_order        AS oc   ON awfp.record_id = oc.c_order_id
+  join c_elementvalue as cc on oc.user1_id=cc.c_elementvalue_id
+  WHERE awfp.wfstate= '${WfState}'
+  and awfa.wfstate= '${WfState}'
+  and awfa.processed = '${processed}'
+  AND awfa.ad_table_id = ${Table} -- order table 
+  AND awfn.sendwsnotification = '${SendNoti}'
+  AND awfp.ad_client_id = ${adclient}
+
+  UNION
+
+  SELECT req.m_requisition_id As DocT,req.documentno,req.created, req.user1_id, awfp.ad_wf_process_id, awfa.ad_wf_activity_id, awfa.ad_table_id, awfp.record_id, awfp.processed, awfa.ad_wf_responsible_id, au.name AS user, au.email, au.phone,req.ad_client_id,req.ad_org_id,req.createdby, req.isapproved as Aprobada, req.docstatus AS Status, cc.name AS ccosto
+
+  FROM ad_wf_process  AS awfp 
+  JOIN ad_wf_activity AS awfa ON awfa.ad_wf_process_id = awfp.ad_wf_process_id
+  join ad_wf_node as awfn on awfa.ad_wf_node_id = awfn.ad_wf_node_id 
+  JOIN ad_user        AS au   ON au.ad_user_id = awfa.ad_user_id
+  JOIN m_requisition        AS req   ON awfp.record_id = req.m_requisition_id
+  join c_elementvalue as cc on req.user1_id=cc.c_elementvalue_id
+  WHERE awfp.wfstate= '${WfState}'
+  and awfa.wfstate= '${WfState}'
+  and awfa.processed = '${processed}'
+  AND awfa.ad_table_id = ${Table2} -- order table 
+  AND awfn.sendwsnotification = '${SendNoti}'
+  AND awfp.ad_client_id = ${adclient}
   
-  
-  const rta= await client.query(`SELECT oc.created, awfp.ad_wf_process_id, awfp.record_id, awfp.processed, awfa.ad_wf_responsible_id, au.name AS user, au.email, au.phone, oc.ad_org_id As Organización, oc.isapproved AS Aprobada, oc.docstatus AS Status FROM ad_wf_process AS awfp JOIN ad_wf_activity AS awfa ON awfa.ad_wf_process_id = awfp.ad_wf_process_id JOIN ad_user AS au ON au.ad_user_id = awfa.ad_user_id JOIN c_order AS oc ON awfp.record_id = oc.c_order_id where oc.isapproved='${IsAproved}' and oc.docstatus='${DocStatus}' and awfa.ad_wf_responsible_id <> ${ResId} ORDER BY 1`);
-   
- 
-   
+  ORDER BY 1`);
+
+    console.log(rta.rowCount);
     if (rta.rowCount > 0) {
+      let i = 0;
 
-     
-       let i = 0;
-      
-       while (i < rta.rowCount){
+      while (i < rta.rowCount) {
         
-        if (rta.rows[i].phone != null){          
+        if (rta.rows[i].phone != null) {
           
-          c_order_id = rta.rows[i].record_id;
-          SendOn = await SelectBd(c_order_id);
+          record_id = rta.rows[i].record_id;
+          user1_id = rta.rows[i].user1_id;
+          ad_wf_activity_id = rta.rows[i].ad_wf_activity_id;
+          ad_table_id = rta.rows[i].ad_table_id;
+          ad_org_id = rta.rows[i].ad_org_id;
+          ad_client_id = rta.rows[i].ad_client_id;
+          documentno = rta.rows[i].documentno;
+          user = rta.rows[i].user;
+          c_costo = rta.rows[i].ccosto;
+
+          SendOn = await SelectBd(record_id, ad_wf_activity_id);
           console.log(SendOn);
-          if (SendOn === 0) {
+
+          let resent_id = await SelectResent(record_id, ad_wf_activity_id);
+
+          if (SendOn === 0 || resent_id > 0) {
             console.log(rta.rows[i].phone);
-            callSendApi(rta.rows[i].phone, c_order_id);
+            console.log(documentno);
+            console.log(user);
+            console.log(c_costo);
+            callSendApi(
+              rta.rows[i].phone,
+              record_id,
+              user1_id,
+              ad_wf_activity_id,
+              ad_table_id,
+              ad_org_id,
+              ad_client_id,
+              documentno,
+              user,
+              c_costo
+            );
           }
-         
-        }              
+        }
 
-       i= i+1;
+        i = i + 1;
       }
-        
-          
+    } else {
+      console.log("No se han conseguido registro en la tabla");
+    }
 
-      } else {
-          console.log('No se han conseguido registro en la tabla');
-     }
-
-     
-    
-
+    client.end();
+  } catch (error) {
+    console.error(error);
+    console.log("Ocurrio un error se esta reiniciando la app ...");
+  } 
 }
 
 
 
-function callSendApi(NroPhone,NroReq) {
-
-  
+function callSendApi(NroPhone,NroReq,NroUser,NroAct,NroTab,NroOrg,NroClient,DocNo,NamU,Ccosto) {  
    
    
-    var options = {
+   var options = {
       'method': 'POST',
-      'url': 'https://graph.facebook.com/v14.0/108485265393652/messages',
+      'url': config.urlApi,
       'headers': {
-        'Authorization': 'Bearer EAASsZC9DBFEEBAC0nUK3IXQtZBPzFC3IF9CaZAQ4G5MSVvYKhAzjIBhZBduZAfkZASB15e5bdBpQ3Y0XFIqtQV1a95tgsZBhmy8mgakOFzyJRLD5r5aDEjZAyeNsJVkbtgMfLkcZACyYMtzSpUeopvltHkprGEzkIm2ojjIPdCrkGQnt78UZA6OVGOQwMSokyuBOeEOOVndAtIZBwZDZD',
-        'Content-Type': 'application/json'
+        'Authorization': config.tokenApp,
+       'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         "messaging_product": "whatsapp",
         "to": NroPhone,
         "type": "template",
         "template": {
-          "name": "ticket_recepcion",
+          "name": "revision_documento",
           "language": {
             "code": "es"
           },
@@ -298,20 +443,20 @@ function callSendApi(NroPhone,NroReq) {
                 }
               ]
             },
-            {
+           {
               "type": "body",
               "parameters": [
-                {
+               {
                   "type": "text",
-                  "text": NroReq
+                "text": DocNo
                 },
                 {
                   "type": "text",
-                  "text": "Msc Bernabe Williams"
+                  "text": NamU
                 },
                 {
                   "type": "text",
-                  "text": "Araure COD"
+                  "text": Ccosto
                 }
               ]
             }
@@ -319,17 +464,29 @@ function callSendApi(NroPhone,NroReq) {
         }
       })
     
-    };
+    };   
+   
     request(options, function (error, response) {
-      if (error) throw new Error(error);                
-          //console.log(response.body);  
-          let data = JSON.parse(response.body);
-          let mssg = (data.messages[0].id);
-          let codorder = (NroReq);
-          const estado = 'sent';
-          InsertBotW(estado,codorder,mssg);
+     // if (error) throw new Error(error);                
+          
+          try {
+            console.log(response.body); 
+            let data = JSON.parse(response.body);    
+            let mssg = (data.messages[0].id);
+            let codorder = (NroReq);
+            const estado = 'sent';
+            UpdateBotw(codorder, NroAct);
+            InsertBotW(estado,codorder,mssg,NroUser,NroAct,NroTab,NroOrg,NroClient,DocNo);
+
+          } catch (error) {
+           
+            console.error(error);            
+            console.log('Ocurrio un error se esta reiniciando la app ...');
+         }
+          
        
        
     });
+   
 }
 
